@@ -81,6 +81,34 @@ inadvertently break it by moving/copying the binary away from other installed
 files.
 
 
+## macOS Packaging
+
+On `APPLE`, configuring with any `CMAKE_BUILD_TYPE` and running `cpack` (or
+`cmake --install`) now produces a self-contained, relocatable native
+`lincity-ng.app` bundle: the binary and its data files are installed
+directly into `Contents/MacOS` and `Contents/Resources`, its third-party
+dylib dependencies are copied into `Contents/Frameworks` and rewritten to
+reference each other via `@rpath`/`@loader_path` (via CMake's
+`fixup_bundle`), and the whole bundle is then ad-hoc code-signed so it can
+launch under Apple Silicon's AMFI enforcement. `LINCITYNG_RELOCATABLE` is
+forced on for `APPLE` builds, since a `.app` bundle is relocatable by
+construction — the bundle can be moved after installation as long as its
+internal layout stays intact.
+
+The ad-hoc signature is **not** a Developer-ID/notarized signature — it's
+only enough to satisfy local code-signing enforcement, not Gatekeeper. A
+`.app` built this way is intended for local/unnotarized use; if it's copied
+to another Mac (e.g. via a zip/tarball download), Gatekeeper will likely
+quarantine it and the user will need to bypass Gatekeeper (e.g. right-click
+> Open, or `xattr -d com.apple.quarantine`) to run it. Building a
+Developer-ID-signed and notarized bundle, and a universal (arm64+x86_64)
+binary, are still left for future work.
+
+Save data and settings are already written to `~/Library/Application
+Support` (see `cfgpath`), not alongside the installed binary, which avoids
+conflicts with a signed bundle's contents.
+
+
 #### LINCITYNG_VERSION_SUFFIX
 
 ```
