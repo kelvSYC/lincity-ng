@@ -113,6 +113,11 @@ if(APPLE)
 	add_compile_definitions("APPLE")
 endif()
 
+if(APPLE)
+  set(CMAKE_MACOSX_BUNDLE ON)
+  set(LINCITYNG_MACOS_BUNDLE_NAME "${PROJECT_NAME}.app")
+endif()
+
 include(CheckCSourceCompiles)
 set(CMAKE_REQUIRED_LIBRARIES ${LibIntl_LIBRARIES})
 check_c_source_compiles("\
@@ -167,11 +172,25 @@ elseif(NOT DEFINED VERSION_${BUILD_TYPE_UPPER})
 endif()
 message(STATUS "LinCity-NG version: ${FULL_PROJECT_VERSION}")
 
+if(APPLE)
+  configure_file(mk/cmake/Info.plist.in
+    "${CMAKE_CURRENT_BINARY_DIR}/Info.plist" @ONLY)
+endif()
+
 
 ### compute installation directories
 include(GNUInstallDirs)
 set(CMAKE_INSTALL_APPDATADIR ${CMAKE_INSTALL_DATADIR}/${CMAKE_PROJECT_NAME})
 set(CMAKE_INSTALL_FULL_APPDATADIR ${CMAKE_INSTALL_FULL_DATADIR}/${CMAKE_PROJECT_NAME})
+if(APPLE)
+  # SDL_GetBasePath() returns Contents/Resources/ in a bundle. "." avoids
+  # double-nesting since BUNDLE DESTINATION installs the whole .app.
+  set(CMAKE_INSTALL_BINDIR ".")
+  set(CMAKE_INSTALL_APPDATADIR "${LINCITYNG_MACOS_BUNDLE_NAME}/Contents/Resources")
+
+  # .app bundles are relocatable by construction.
+  set(LINCITYNG_RELOCATABLE ON CACHE BOOL "Build a relocatable binary" FORCE)
+endif()
 set(CMAKE_BINARY_BINDIR ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
 set(CMAKE_BINARY_DATADIR ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATADIR})
 set(CMAKE_BINARY_APPDATADIR ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_APPDATADIR})
@@ -185,10 +204,16 @@ add_subdirectory(lib)
 
 
 ### runtime dependency installation for Windows
+if(APPLE)
+  set_target_properties(lincity-ng PROPERTIES
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
+  )
+endif()
 set_target_properties(lincity-ng PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_BINDIR})
 install(TARGETS lincity-ng
 	RUNTIME_DEPENDENCY_SET dll_dependencies
 	RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+	BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 if(WIN32)
 	# from https://gitlab.kitware.com/cmake/cmake/-/issues/20753#note_870046
@@ -208,6 +233,53 @@ if(WIN32)
 		UNRESOLVED_DEPENDENCIES_VAR DUMMY  # hacky!
 		RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 	)
+endif()
+if(APPLE)
+  install(RUNTIME_DEPENDENCY_SET dll_dependencies
+    DESTINATION "${LINCITYNG_MACOS_BUNDLE_NAME}/Contents/Frameworks"
+    PRE_EXCLUDE_REGEXES "^/usr/lib/.*" "^/System/Library/.*"
+    POST_EXCLUDE_REGEXES ".*"
+    POST_INCLUDE_REGEXES ".*"
+  )
+  # Quoted, not [[bracket]], so ${LINCITYNG_MACOS_BUNDLE_NAME} substitutes now.
+  # dirs=Frameworks lets @rpath siblings resolve after being copied flat.
+  # \$ENV{DESTDIR} (here and below) matches CMake's own install rules.
+  install(CODE "
+    include(BundleUtilities)
+    fixup_bundle(
+      \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${LINCITYNG_MACOS_BUNDLE_NAME}\"
+      \"\"
+      \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${LINCITYNG_MACOS_BUNDLE_NAME}/Contents/Frameworks\"
+    )
+  ")
+
+  # Sweep CMake's own bookkeeping back out (see add_subdirectory(data ...) above).
+  install(CODE "
+    file(GLOB_RECURSE _lincityng_cmake_build_artifacts
+      LIST_DIRECTORIES true
+      \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${LINCITYNG_MACOS_BUNDLE_NAME}/Contents/Resources/*\"
+    )
+    foreach(_artifact \${_lincityng_cmake_build_artifacts})
+      get_filename_component(_artifact_name \"\${_artifact}\" NAME)
+      if(_artifact_name STREQUAL \"CMakeFiles\"
+          OR _artifact_name STREQUAL \"Makefile\"
+          OR _artifact_name STREQUAL \"cmake_install.cmake\")
+        file(REMOVE_RECURSE \"\${_artifact}\")
+      endif()
+    endforeach()
+  ")
+
+  # fixup_bundle() invalidates code signatures; re-sign or AMFI kills the bundle.
+  install(CODE "
+    execute_process(
+      COMMAND codesign --force --deep --sign - \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${LINCITYNG_MACOS_BUNDLE_NAME}\"
+      RESULT_VARIABLE _lincityng_codesign_result
+      ERROR_VARIABLE _lincityng_codesign_error
+    )
+    if(NOT _lincityng_codesign_result EQUAL 0)
+      message(FATAL_ERROR \"codesign failed (\${_lincityng_codesign_result}): \${_lincityng_codesign_error}\")
+    endif()
+  ")
 endif()
 # if (WIN32)
 # 	install(FILES $<TARGET_PDB_FILE:lincity-ng> DESTINATION . OPTIONAL)

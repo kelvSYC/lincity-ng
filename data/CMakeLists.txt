@@ -83,8 +83,10 @@ install(FILES ${APPSTREAM_ID}_2x.png
 add_custom_target(data-files.target ALL DEPENDS ${data_files_out})
 
 
+# Resolve relative to this script; CMAKE_INSTALL_FULL_APPDATADIR isn't
+# remapped for the APPLE bundle.
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/1328-to-2130.sh
-  "#!/usr/bin/env bash\nzcat | sed '3,\$y/ /-/' | xsltproc ${CMAKE_INSTALL_FULL_APPDATADIR}/1328-to-2130.xsl - | gzip -9 -c")
+  "#!/usr/bin/env bash\nscriptDir=\"\$(cd \"\$(dirname \"\${BASH_SOURCE[0]}\")\" && pwd)\"\nzcat | sed '3,\$y/ /-/' | xsltproc \"\$scriptDir/1328-to-2130.xsl\" - | gzip -9 -c")
 install(FILES ${CMAKE_SOURCE_DIR}/contrib/ldsv-format-convert/1328-to-2130.xsl
   DESTINATION ${CMAKE_INSTALL_APPDATADIR})
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/1328-to-2130.sh
