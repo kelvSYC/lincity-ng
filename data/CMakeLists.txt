@@ -31,6 +31,47 @@ if(WIN32)
   target_sources(lincity-ng PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/${APPSTREAM_ID}.ico.rc)
 endif()
 
+# app icon for macOS
+if(APPLE)
+  set(MACOS_ICNS_FILE "${CMAKE_CURRENT_BINARY_DIR}/${APPSTREAM_ID}.icns")
+  set(MACOS_ICONSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/${APPSTREAM_ID}.iconset")
+  file(MAKE_DIRECTORY "${MACOS_ICONSET_DIR}")
+  foreach(iconSize IN ITEMS 16 32 128 256 512)
+    math(EXPR iconSize2x "${iconSize} * 2")
+    execute_process(
+      COMMAND sips -z ${iconSize} ${iconSize} "${CMAKE_CURRENT_SOURCE_DIR}/${APPSTREAM_ID}_2x.png"
+        --out "${MACOS_ICONSET_DIR}/icon_${iconSize}x${iconSize}.png"
+      RESULT_VARIABLE sipsResult
+      OUTPUT_QUIET
+    )
+    if(NOT sipsResult EQUAL 0)
+      message(FATAL_ERROR "Failed to generate ${iconSize}x${iconSize} icon via sips")
+    endif()
+    execute_process(
+      COMMAND sips -z ${iconSize2x} ${iconSize2x} "${CMAKE_CURRENT_SOURCE_DIR}/${APPSTREAM_ID}_2x.png"
+        --out "${MACOS_ICONSET_DIR}/icon_${iconSize}x${iconSize}@2x.png"
+      RESULT_VARIABLE sipsResult
+      OUTPUT_QUIET
+    )
+    if(NOT sipsResult EQUAL 0)
+      message(FATAL_ERROR "Failed to generate ${iconSize}x${iconSize}@2x icon via sips")
+    endif()
+  endforeach()
+  execute_process(
+    COMMAND iconutil -c icns "${MACOS_ICONSET_DIR}" -o "${MACOS_ICNS_FILE}"
+    RESULT_VARIABLE iconutilResult
+  )
+  if(NOT iconutilResult EQUAL 0)
+    message(FATAL_ERROR "Failed to generate .icns via iconutil")
+  endif()
+  # Scratch dir only; remove so it doesn't ship inside the installed
+  # bundle (CMAKE_CURRENT_BINARY_DIR is inside Contents/Resources here).
+  file(REMOVE_RECURSE "${MACOS_ICONSET_DIR}")
+  install(FILES "${MACOS_ICNS_FILE}"
+    DESTINATION "${CMAKE_INSTALL_APPDATADIR}"
+  )
+endif()
+
 install(FILES ${APPSTREAM_ID}.png
   DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/128x128/apps"
 )
