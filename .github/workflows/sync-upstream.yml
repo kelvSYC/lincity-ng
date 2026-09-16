@@ -1,0 +1,102 @@
+name: Sync upstream
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC. Adjust if a different cadence/day is
+    # wanted later — this is not a load-bearing choice, just "weekly".
+    - cron: '0 6 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Add upstream remote and fetch
+        run: |
+          git remote add upstream https://github.com/lincity-ng/lincity-ng.git
+          git fetch upstream --tags
+
+      - name: Fast-forward master onto upstream/master
+        id: sync_master
+        continue-on-error: true
+        run: |
+          git checkout master
+          if git merge-base --is-ancestor master upstream/master; then
+            git merge --ff-only upstream/master
+            git push origin master
+            echo "Fast-forwarded master to upstream/master."
+          else
+            echo "::error::master has diverged from upstream/master (not a fast-forward). Manual intervention required — this step is expected to always succeed since master should only ever mirror upstream."
+            exit 1
+          fi
+
+      - name: Rebase macos-build-fix onto master
+        id: sync_macos
+        if: always()
+        continue-on-error: true
+        run: |
+          git fetch origin master
+          git checkout macos-build-fix
+          if git rebase origin/master; then
+            git push --force-with-lease origin macos-build-fix
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+            echo "Rebased macos-build-fix onto master."
+          else
+            git rebase --abort
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::macos-build-fix could not be rebased onto master cleanly; opening a tracking issue."
+            exit 1
+          fi
+
+      - name: Open tracking issue on rebase conflict
+        if: always() && steps.sync_macos.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          cat > /tmp/issue-body.md <<'BODY_EOF'
+          The weekly upstream sync workflow could not cleanly rebase `macos-build-fix` onto the updated `master`.
+
+          Run `git fetch upstream && git checkout macos-build-fix && git rebase upstream/master` locally to see and resolve the conflicting commits, then force-push.
+
+          Workflow run: $RUN_URL
+          BODY_EOF
+          # Substitute $RUN_URL manually since the heredoc above is quoted
+          # (deliberately, so the literal backticks above aren't run as
+          # shell command substitution).
+          sed -i "s#\$RUN_URL#$RUN_URL#" /tmp/issue-body.md
+          existing="$(gh issue list --label sync-conflict --state open --limit 1 --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            echo "Open sync-conflict issue #$existing already exists; not creating a duplicate."
+          else
+            gh issue create \
+              --title "sync-upstream: macos-build-fix rebase conflict ($(date -u +%Y-%m-%d))" \
+              --label sync-conflict \
+              --body-file /tmp/issue-body.md
+          fi
+
+      - name: Push any newly fetched tags
+        if: always()
+        run: git push origin --tags
+
+      - name: Fail if any sync step failed
+        if: always() && (steps.sync_master.outcome == 'failure' || steps.sync_macos.outcome == 'failure')
+        run: |
+          echo "::error::One or more sync steps failed; see annotations above."
+          exit 1
