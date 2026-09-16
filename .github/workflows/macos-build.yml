@@ -1,0 +1,80 @@
+name: macOS build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: >-
+          Git ref (tag or branch) to build. Leave empty to build the
+          macos-build-fix branch (kept rebased onto upstream by the
+          sync-upstream workflow).
+        required: false
+        default: ''
+  # push:
+  #   tags:
+  #     - 'lincity-ng-*'
+  # Disabled for now — builds are triggered manually per the fork's CI
+  # design (docs/superpowers/specs/2026-09-15-github-actions-ci-design.md).
+  # Uncomment to auto-build on every new release tag instead.
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve build ref
+        id: resolve
+        env:
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          if [ -n "$INPUT_REF" ]; then
+            target="$INPUT_REF"
+          else
+            target="macos-build-fix"
+          fi
+          if ! [[ "$target" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::ref '$target' contains characters outside [A-Za-z0-9._/-]"
+            exit 1
+          fi
+          sanitized="${target//\//-}"
+          echo "ref=$target" >> "$GITHUB_OUTPUT"
+          echo "sanitized_ref=$sanitized" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout resolved ref
+        env:
+          RESOLVED_REF: ${{ steps.resolve.outputs.ref }}
+        run: git checkout "$RESOLVED_REF"
+
+      - name: Install dependencies
+        run: |
+          brew install cmake pkg-config sdl3 sdl3_image sdl3_mixer sdl3_ttf \
+            libxml2 libxml++@5 fmt gettext
+
+      - name: Configure
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix libxml2)"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Package
+        run: |
+          cd build
+          cpack
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lincity-ng-macos-${{ steps.resolve.outputs.sanitized_ref }}
+          path: build/lincity-ng-*-Darwin.tar.xz*
+          retention-days: 7
+          if-no-files-found: error
