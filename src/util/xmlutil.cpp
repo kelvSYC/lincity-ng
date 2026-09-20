@@ -35,6 +35,11 @@
 #include <type_traits>
 #include <typeinfo>
 
+#ifdef __APPLE__
+#include <cerrno>   // for errno, ERANGE
+#include <cstdlib>  // for strtod, strtof
+#endif
+
 void unexpectedXmlElement(xmlpp::TextReader& reader) {
   fmt::println(stderr, "warning: skipping unexpected element <{}>",
     reader.get_name());
@@ -133,37 +138,67 @@ X xmlParse(const xmlpp::ustring& s) {
   char *cs = str.data();
   char *ce = cs + str.size();
 
-  // cut out the '0x' prefix
-  bool hex = false;
-  if(*cs == '-' || *cs == '+') cs++;
-  if(*cs == '0' && (cs[1] == 'x' || cs[1] == 'X')) {
-    cs += 2;
-    hex = true;
+#ifdef __APPLE__
+  // Apple's libc++ doesn't implement std::from_chars for floating-point
+  // types (still true as of Xcode 16.4); fall back to strtof/strtod,
+  // which natively handle sign and the "0x1.8p3" hex-float syntax.
+  // Wrapped in `if constexpr ... else` (not a standalone early return)
+  // so the incompatible std::from_chars<float> call below is discarded
+  // for this instantiation, not merely skipped at runtime.
+  if constexpr (!std::is_integral_v<X>) {
+    errno = 0;
+    char *end;
+    if constexpr (std::is_same_v<X, float>)
+      x = strtof(cs, &end);
+    else
+      x = strtod(cs, &end);
+    if(end == cs || errno == ERANGE)
+      throw std::system_error(
+        std::make_error_code(std::errc::invalid_argument), fmt::format(
+        "failed to parse XML value of type {:?}: {:?}", typeid(X).name(), s));
+    if(end != ce) {
+      fmt::println(stderr,
+        "error: detected extra characters after number: {:?}",
+        s
+      );
+    }
+    assert(end == ce);
   }
-  if(str[0] == '-') {
-    cs--;
-    *cs = '-';
-  }
+  else
+#endif
+  {
+    // cut out the '0x' prefix
+    bool hex = false;
+    if(*cs == '-' || *cs == '+') cs++;
+    if(*cs == '0' && (cs[1] == 'x' || cs[1] == 'X')) {
+      cs += 2;
+      hex = true;
+    }
+    if(str[0] == '-') {
+      cs--;
+      *cs = '-';
+    }
 
-  std::from_chars_result r;
-  if constexpr (std::is_integral_v<X>) {
-    r = std::from_chars(cs, ce, x, hex ? 16 : 10);
-  }
-  else {
-    r = std::from_chars(cs, ce, x,
-      hex ? std::chars_format::hex : std::chars_format::general);
-  }
+    std::from_chars_result r;
+    if constexpr (std::is_integral_v<X>) {
+      r = std::from_chars(cs, ce, x, hex ? 16 : 10);
+    }
+    else {
+      r = std::from_chars(cs, ce, x,
+        hex ? std::chars_format::hex : std::chars_format::general);
+    }
 
-  if(r.ec != std::errc{})
-    throw std::system_error(std::make_error_code(r.ec), fmt::format(
-      "failed to parse XML value of type {:?}: {:?}", typeid(X).name(), s));
-  if(r.ptr != ce) {
-    fmt::println(stderr,
-      "error: detected extra characters after number: {:?}",
-      s
-    );
+    if(r.ec != std::errc{})
+      throw std::system_error(std::make_error_code(r.ec), fmt::format(
+        "failed to parse XML value of type {:?}: {:?}", typeid(X).name(), s));
+    if(r.ptr != ce) {
+      fmt::println(stderr,
+        "error: detected extra characters after number: {:?}",
+        s
+      );
+    }
+    assert(r.ptr == ce);
   }
-  assert(r.ptr == ce);
   return x;
 }
 
