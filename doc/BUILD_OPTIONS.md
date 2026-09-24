@@ -84,6 +84,13 @@ inadvertently break it by moving/copying the binary away from other installed
 files.
 
 
+## macOS Packaging
+
+On macOS, `cpack` and `cmake --install` produce a relocatable `lincity-ng.app`
+with its dylibs in `Contents/Frameworks`. `LINCITYNG_RELOCATABLE` is always
+enabled. The bundle is only ad-hoc signed, not notarized.
+
+
 ## LINCITYNG_VERSION_SUFFIX
 
 ```
