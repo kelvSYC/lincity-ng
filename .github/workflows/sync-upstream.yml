@@ -1,0 +1,57 @@
+name: Sync upstream
+
+# Mirrors upstream master and tags into this fork, and rebases the default
+# branch (which carries the macOS bundle commits and these workflows) onto
+# upstream master. A rebase conflict fails the run; rebase locally and
+# force-push.
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/lincity-ng/lincity-ng.git
+          git fetch upstream --tags
+
+      - name: Mirror master
+        run: |
+          if ! git merge-base --is-ancestor origin/master upstream/master; then
+            echo "::error::master has diverged from upstream master"
+            exit 1
+          fi
+          git push origin upstream/master:refs/heads/master
+
+      - name: Rebase default branch
+        if: ${{ !cancelled() }}
+        env:
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -B "$BRANCH" "origin/$BRANCH"
+          if ! git rebase upstream/master; then
+            git rebase --abort
+            echo "::error::$BRANCH does not rebase cleanly onto upstream master"
+            exit 1
+          fi
+          git push --force-with-lease="$BRANCH:origin/$BRANCH" origin "$BRANCH"
+
+      - name: Mirror tags
+        if: ${{ !cancelled() }}
+        run: git push origin --tags
