@@ -188,6 +188,10 @@ endif()
 message(STATUS "LinCity-NG version: ${FULL_PROJECT_VERSION}")
 
 if(APPLE)
+  if(CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(LINCITYNG_MACOS_MINIMUM_SYSTEM_VERSION
+      "<key>LSMinimumSystemVersion</key>\n  <string>${CMAKE_OSX_DEPLOYMENT_TARGET}</string>")
+  endif()
   configure_file(mk/cmake/Info.plist.in
     "${CMAKE_CURRENT_BINARY_DIR}/Info.plist" @ONLY)
 endif()

@@ -20,5 +20,6 @@
   <string>APPL</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  @LINCITYNG_MACOS_MINIMUM_SYSTEM_VERSION@
 </dict>
 </plist>
