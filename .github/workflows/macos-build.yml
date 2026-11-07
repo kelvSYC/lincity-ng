@@ -1,0 +1,53 @@
+name: macOS build
+
+# Builds the .app bundle from the branch this is run on. Artifacts on this
+# public repository are publicly downloadable, hence manual runs and short
+# retention.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  MACOS_MINIMUM: '26.0'
+
+jobs:
+  build:
+    # Pinned rather than macos-latest: bundled Homebrew dylibs keep their
+    # bottles' minimum macOS, so the runner's version is the bundle's floor.
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # tags, for the version string
+
+      - name: Install dependencies
+        run: brew install sdl3 sdl3_image sdl3_mixer sdl3_ttf libxml++@5 fmt gettext
+
+      - name: Configure
+        run: >-
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_MINIMUM"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Package
+        working-directory: build
+        run: cpack
+
+      - name: Check bundle
+        run: |
+          mkdir "$RUNNER_TEMP/artifact"
+          tar -xJf build/lincity-ng-*-Darwin.tar.xz -C "$RUNNER_TEMP/artifact"
+          app=$(find "$RUNNER_TEMP/artifact" -maxdepth 2 -name '*.app' -type d)
+          .github/scripts/check-macos-bundle.sh "$app" "$MACOS_MINIMUM"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lincity-ng-macos
+          path: build/lincity-ng-*-Darwin.tar.xz*
+          retention-days: 7
+          if-no-files-found: error
