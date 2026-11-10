@@ -40,14 +40,13 @@ jobs:
 
       - name: Check bundle
         run: |
-          mkdir "$RUNNER_TEMP/artifact"
-          tar -xJf build/lincity-ng-*-Darwin.tar.xz -C "$RUNNER_TEMP/artifact"
-          app=$(find "$RUNNER_TEMP/artifact" -maxdepth 2 -name '*.app' -type d)
-          .github/scripts/check-macos-bundle.sh "$app" "$MACOS_MINIMUM"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" build/lincity-ng-*-Darwin.dmg
+          .github/scripts/check-macos-bundle.sh "$RUNNER_TEMP/dmg/lincity-ng.app" "$MACOS_MINIMUM"
+          hdiutil detach "$RUNNER_TEMP/dmg"
 
       - uses: actions/upload-artifact@v7
         with:
           name: lincity-ng-macos
-          path: build/lincity-ng-*-Darwin.tar.xz*
+          path: build/lincity-ng-*-Darwin.dmg*
           retention-days: 7
           if-no-files-found: error
